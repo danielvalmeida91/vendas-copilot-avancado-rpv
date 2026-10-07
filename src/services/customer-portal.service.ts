@@ -78,10 +78,24 @@ export async function updateScheduledGiftRecipient(params: UpdateVoucherParams) 
     };
   }
 
+  if (voucher.status === 'ISSUED') {
+    return {
+      success: false,
+      error: 'Não é possível alterar dados de um presente que já foi enviado.',
+    };
+  }
+
   if (voucher.status === 'REVOKED') {
     return {
       success: false,
       error: 'Este presente foi cancelado e não pode ser editado.',
+    };
+  }
+
+  if (voucher.status !== VoucherStatus.SCHEDULED) {
+    return {
+      success: false,
+      error: 'Apenas presentes com envio agendado pendente podem ser alterados.',
     };
   }
 

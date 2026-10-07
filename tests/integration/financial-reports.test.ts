@@ -174,7 +174,7 @@ describe('Financial Reporting & Accounting Export Seam (Ticket 10 / Issue #11)',
 
     const csv = exportReportAsCsv(report);
 
-    expect(csv).toContain('Data;Pedido;Status;Meio;Cliente;CPF;Valor_Bruto;Desconto;Valor_Liquido');
+    expect(csv).toContain('Data;Pedido;Status;Meio;Cliente;CPF;Itens;Valor_Bruto;Desconto;Valor_Liquido');
     expect(csv).toContain('ORD-FIN-001');
     expect(csv).toContain('12312312312');
     expect(csv).toContain('100.00');

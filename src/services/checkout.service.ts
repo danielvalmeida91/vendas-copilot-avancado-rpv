@@ -1,8 +1,21 @@
 import { prisma } from '@/lib/prisma';
 import { calculateCart, CartItemInput } from '@/services/cart.service';
+import { findOrCreateCustomer, normalizeCpf } from '@/lib/customer-utils';
+import { emailService } from '@/lib/email-service';
 import { PaymentMethod } from '@prisma/client';
 import { z } from 'zod';
 import crypto from 'crypto';
+
+export const checkoutItemSchema = z.object({
+  productId: z.string(),
+  allocationMode: z.enum(['FOR_SELF', 'FOR_GIFT']),
+  quantity: z.number().int().min(1),
+  giftDeliveryType: z.enum(['IMMEDIATE_LINK', 'SCHEDULED_EMAIL']).optional(),
+  recipientName: z.string().optional(),
+  recipientEmail: z.string().email().optional().or(z.literal('')),
+  giftScheduledAt: z.union([z.string(), z.date()]).optional(),
+  giftMessage: z.string().optional(),
+});
 
 export const checkoutSchema = z.object({
   customer: z.object({
@@ -10,11 +23,11 @@ export const checkoutSchema = z.object({
     email: z.string().email('E-mail informado é inválido.'),
     cpf: z
       .string()
-      .transform((val) => val.replace(/\D/g, ''))
+      .transform(normalizeCpf)
       .refine((val) => val.length === 11, 'CPF deve conter exatamente 11 dígitos numéricos.'),
   }),
   paymentMethod: z.nativeEnum(PaymentMethod),
-  items: z.array(z.any()).min(1, 'O carrinho precisa ter ao menos um item.'),
+  items: z.array(checkoutItemSchema).min(1, 'O carrinho precisa ter ao menos um item.'),
   couponCode: z.string().optional(),
 });
 
@@ -60,21 +73,16 @@ export async function processCheckout(rawInput: CheckoutInput): Promise<ProcessC
   const { customer, paymentMethod, items, couponCode } = parseResult.data;
 
   // 1. Resolve or provision guest user in background
-  let user = await prisma.user.findFirst({
-    where: {
-      OR: [{ email: customer.email }, { cpf: customer.cpf }],
-    },
-  });
+  const user = await findOrCreateCustomer(prisma, customer);
 
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        name: customer.name,
-        email: customer.email,
-        cpf: customer.cpf,
-        passwordHash: null, // Guest account created transparently
-        role: 'CUSTOMER',
-      },
+  // If user has no password (guest account), dispatch onboarding link per spec
+  if (!user.passwordHash && emailService.sendOnboardingEmail) {
+    const onboardingToken = crypto.randomBytes(24).toString('hex');
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    await emailService.sendOnboardingEmail({
+      name: user.name,
+      email: user.email,
+      onboardingUrl: `${baseUrl}/definir-senha?token=${onboardingToken}`,
     });
   }
 
@@ -99,7 +107,7 @@ export async function processCheckout(rawInput: CheckoutInput): Promise<ProcessC
     const order = await tx.order.create({
       data: {
         orderNumber,
-        userId: user!.id,
+        userId: user.id,
         status: 'PENDING',
         paymentMethod,
         subtotalInCents: calculation.subtotalInCents,
@@ -122,22 +130,6 @@ export async function processCheckout(rawInput: CheckoutInput): Promise<ProcessC
         },
       },
     });
-
-    if (calculation.coupon) {
-      await tx.couponUsage.create({
-        data: {
-          couponId: calculation.coupon.id,
-          orderId: order.id,
-          userId: user!.id,
-          discountAmountCents: calculation.discountInCents,
-        },
-      });
-
-      await tx.coupon.update({
-        where: { id: calculation.coupon.id },
-        data: { currentUses: { increment: 1 } },
-      });
-    }
 
     return order;
   });
