@@ -12,9 +12,11 @@ describe('Catalog & License Ownership Seam (Ticket 02 / Issue #3)', () => {
   let unownedProductId: string;
 
   beforeAll(async () => {
-    // Clean up test data
+    // Clean up test data in correct foreign key order
+    await prisma.giftVoucher.deleteMany();
     await prisma.license.deleteMany();
     await prisma.orderItem.deleteMany();
+    await prisma.couponUsage.deleteMany();
     await prisma.order.deleteMany();
     await prisma.product.deleteMany();
     await prisma.user.deleteMany();
@@ -86,8 +88,10 @@ describe('Catalog & License Ownership Seam (Ticket 02 / Issue #3)', () => {
   });
 
   afterAll(async () => {
+    await prisma.giftVoucher.deleteMany();
     await prisma.license.deleteMany();
     await prisma.orderItem.deleteMany();
+    await prisma.couponUsage.deleteMany();
     await prisma.order.deleteMany();
     await prisma.product.deleteMany();
     await prisma.user.deleteMany();
