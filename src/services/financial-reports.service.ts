@@ -14,6 +14,7 @@ export interface FinancialReportRow {
   customerName: string;
   customerEmail: string;
   customerCpf: string;
+  itemsSummary: string;
   status: OrderStatus;
   paymentMethod: PaymentMethod;
   grossAmountInCents: number;
@@ -81,12 +82,12 @@ export async function generateFinancialReport(
     CREDIT_CARD: { count: 0, totalInCents: 0 },
   };
 
-  const rows: FinancialReportRow[] = orders.map((o) => {
+  const rows: FinancialReportRow[] = orders.map((order) => {
     // For net reporting, cancelled/refunded can be considered 0 net or tracked as recorded
-    const isSettled = o.status === OrderStatus.PAID;
-    const gross = o.subtotalInCents;
-    const discount = o.discountInCents;
-    const net = o.totalInCents;
+    const isSettled = order.status === OrderStatus.PAID;
+    const gross = order.subtotalInCents;
+    const discount = order.discountInCents;
+    const net = order.totalInCents;
     // Estimated tax 6% on net settled revenue
     const estimatedTax = isSettled ? Math.round(net * 0.06) : 0;
 
@@ -96,24 +97,29 @@ export async function generateFinancialReport(
       totalNetInCents += net;
       totalEstimatedTaxesInCents += estimatedTax;
 
-      if (o.paymentMethod === PaymentMethod.PIX) {
+      if (order.paymentMethod === PaymentMethod.PIX) {
         byPaymentMethod.PIX.count += 1;
         byPaymentMethod.PIX.totalInCents += net;
-      } else if (o.paymentMethod === PaymentMethod.CREDIT_CARD) {
+      } else if (order.paymentMethod === PaymentMethod.CREDIT_CARD) {
         byPaymentMethod.CREDIT_CARD.count += 1;
         byPaymentMethod.CREDIT_CARD.totalInCents += net;
       }
     }
 
+    const itemsSummary = order.items
+      .map((item) => `${item.quantity}x ${item.product.name}`)
+      .join(', ');
+
     return {
-      date: o.createdAt.toISOString(),
-      orderNumber: o.orderNumber,
-      gatewayTransactionId: o.gatewayTransactionId,
-      customerName: o.user.name,
-      customerEmail: o.user.email,
-      customerCpf: o.user.cpf,
-      status: o.status,
-      paymentMethod: o.paymentMethod,
+      date: order.createdAt.toISOString(),
+      orderNumber: order.orderNumber,
+      gatewayTransactionId: order.gatewayTransactionId,
+      customerName: order.user.name,
+      customerEmail: order.user.email,
+      customerCpf: order.user.cpf,
+      itemsSummary,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
       grossAmountInCents: gross,
       discountAmountInCents: discount,
       netAmountInCents: net,
@@ -144,6 +150,7 @@ export function exportReportAsCsv(report: FinancialReportData): string {
     'Meio',
     'Cliente',
     'CPF',
+    'Itens',
     'Valor_Bruto',
     'Desconto',
     'Valor_Liquido',
@@ -151,19 +158,20 @@ export function exportReportAsCsv(report: FinancialReportData): string {
     'Transacao_Gateway',
   ].join(';');
 
-  const lines = report.rows.map((r) => {
+  const lines = report.rows.map((row) => {
     return [
-      `"${r.date}"`,
-      `"${r.orderNumber}"`,
-      `"${r.status}"`,
-      `"${r.paymentMethod}"`,
-      `"${r.customerName.replace(/"/g, '""')}"`,
-      `"${r.customerCpf}"`,
-      (r.grossAmountInCents / 100).toFixed(2),
-      (r.discountAmountInCents / 100).toFixed(2),
-      (r.netAmountInCents / 100).toFixed(2),
-      (r.estimatedTaxInCents / 100).toFixed(2),
-      `"${r.gatewayTransactionId || ''}"`,
+      `"${row.date}"`,
+      `"${row.orderNumber}"`,
+      `"${row.status}"`,
+      `"${row.paymentMethod}"`,
+      `"${row.customerName.replace(/"/g, '""')}"`,
+      `"${row.customerCpf}"`,
+      `"${row.itemsSummary.replace(/"/g, '""')}"`,
+      (row.grossAmountInCents / 100).toFixed(2),
+      (row.discountAmountInCents / 100).toFixed(2),
+      (row.netAmountInCents / 100).toFixed(2),
+      (row.estimatedTaxInCents / 100).toFixed(2),
+      `"${row.gatewayTransactionId || ''}"`,
     ].join(';');
   });
 

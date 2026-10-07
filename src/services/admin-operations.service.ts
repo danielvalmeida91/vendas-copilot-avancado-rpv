@@ -30,12 +30,12 @@ export async function listAdminOrders(params: ListAdminOrdersParams = {}) {
   }
 
   if (params.search) {
-    const s = params.search.trim();
+    const searchQuery = params.search.trim();
     where.OR = [
-      { orderNumber: { contains: s, mode: 'insensitive' } },
-      { user: { name: { contains: s, mode: 'insensitive' } } },
-      { user: { email: { contains: s, mode: 'insensitive' } } },
-      { user: { cpf: { contains: s } } },
+      { orderNumber: { contains: searchQuery, mode: 'insensitive' } },
+      { user: { name: { contains: searchQuery, mode: 'insensitive' } } },
+      { user: { email: { contains: searchQuery, mode: 'insensitive' } } },
+      { user: { cpf: { contains: searchQuery } } },
     ];
   }
 

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { VoucherStatus } from '@prisma/client';
+import { findOrCreateCustomer, normalizeCpf } from '@/lib/customer-utils';
 
 export interface VoucherDetailsResult {
   isValid: boolean;
@@ -100,7 +101,7 @@ export async function getVoucherByToken(token: string): Promise<VoucherDetailsRe
 
 export async function claimGiftVoucher(input: ClaimVoucherInput): Promise<ClaimVoucherResult> {
   const { token, beneficiary } = input;
-  const cleanCpf = beneficiary.cpf.replace(/\D/g, '');
+  const cleanCpf = normalizeCpf(beneficiary.cpf);
 
   if (!cleanCpf || cleanCpf.length !== 11) {
     return {
@@ -111,7 +112,7 @@ export async function claimGiftVoucher(input: ClaimVoucherInput): Promise<ClaimV
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Fetch voucher with row locking / check
+      // 1. Fetch voucher with row check
       const voucher = await tx.giftVoucher.findUnique({
         where: { token },
         include: {
@@ -124,32 +125,20 @@ export async function claimGiftVoucher(input: ClaimVoucherInput): Promise<ClaimV
         throw new Error('Voucher de presente não encontrado.');
       }
 
-      if (voucher.status === 'REDEEMED') {
+      if (voucher.status === VoucherStatus.REDEEMED) {
         throw new Error('Este voucher já foi resgatado anteriormente.');
       }
 
-      if (voucher.status === 'REVOKED') {
+      if (voucher.status === VoucherStatus.REVOKED) {
         throw new Error('Este voucher foi cancelado/estornado.');
       }
 
       // 2. Resolve or provision beneficiary account in background
-      let user = await tx.user.findFirst({
-        where: {
-          OR: [{ email: beneficiary.email }, { cpf: cleanCpf }],
-        },
+      const user = await findOrCreateCustomer(tx, {
+        name: beneficiary.name,
+        email: beneficiary.email,
+        cpf: cleanCpf,
       });
-
-      if (!user) {
-        user = await tx.user.create({
-          data: {
-            name: beneficiary.name,
-            email: beneficiary.email,
-            cpf: cleanCpf,
-            passwordHash: null,
-            role: 'CUSTOMER',
-          },
-        });
-      }
 
       // 3. Prevent duplicate active license for same product if restricted
       if (!voucher.product.canPurchaseMultipleSelf) {
@@ -166,17 +155,22 @@ export async function claimGiftVoucher(input: ClaimVoucherInput): Promise<ClaimV
         }
       }
 
-      // 4. Mark voucher as REDEEMED
-      const updatedVoucher = await tx.giftVoucher.update({
+      // 4. Mark voucher as REDEEMED atomically (conditional check against race conditions)
+      const updateResult = await tx.giftVoucher.updateMany({
         where: {
           id: voucher.id,
+          status: { in: [VoucherStatus.ISSUED, VoucherStatus.SCHEDULED] },
         },
         data: {
-          status: 'REDEEMED',
+          status: VoucherStatus.REDEEMED,
           redeemedAt: new Date(),
           recipientUserId: user.id,
         },
       });
+
+      if (updateResult.count === 0) {
+        throw new Error('Este voucher já foi resgatado concorrentemente.');
+      }
 
       // 5. Grant active License to beneficiary
       const license = await tx.license.create({
@@ -184,7 +178,7 @@ export async function claimGiftVoucher(input: ClaimVoucherInput): Promise<ClaimV
           userId: user.id,
           productId: voucher.productId,
           orderId: voucher.orderItem.orderId,
-          giftVoucherId: updatedVoucher.id,
+          giftVoucherId: voucher.id,
           status: 'ACTIVE',
         },
       });

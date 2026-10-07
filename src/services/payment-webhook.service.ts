@@ -128,6 +128,23 @@ export async function processPaymentWebhook(params: {
           },
         });
 
+        // Record coupon usage and increment uses upon successful payment
+        if (order.couponId && order.discountInCents > 0) {
+          await tx.couponUsage.create({
+            data: {
+              couponId: order.couponId,
+              orderId: order.id,
+              userId: order.userId,
+              discountAmountCents: order.discountInCents,
+            },
+          });
+
+          await tx.coupon.update({
+            where: { id: order.couponId },
+            data: { currentUses: { increment: 1 } },
+          });
+        }
+
         // Fulfill line items
         for (const item of order.items) {
           if (item.allocationMode === 'FOR_SELF') {
