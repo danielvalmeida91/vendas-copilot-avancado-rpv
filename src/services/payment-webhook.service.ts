@@ -7,7 +7,8 @@ export interface PaymentWebhookPayload {
   eventId: string;
   eventType: 'PAYMENT_CONFIRMED' | 'PAYMENT_FAILED';
   transactionId: string;
-  orderId: string;
+  orderId?: string;
+  orderNumber?: string;
   amountInCents: number;
   paidAt?: string;
 }
@@ -98,14 +99,26 @@ export async function processPaymentWebhook(params: {
         },
       });
 
-      // Find target order
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        include: { items: true },
-      });
+      // Find target order by UUID (id) or orderNumber
+      const targetIdentifier = payload.orderId || payload.orderNumber;
+      if (!targetIdentifier) {
+        throw new Error('Identificador do pedido (orderId ou orderNumber) não informado no payload.');
+      }
+
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetIdentifier);
+
+      const order = isUuid
+        ? await tx.order.findUnique({
+            where: { id: targetIdentifier },
+            include: { items: true },
+          })
+        : await tx.order.findUnique({
+            where: { orderNumber: targetIdentifier },
+            include: { items: true },
+          });
 
       if (!order) {
-        throw new Error(`Pedido com ID ${orderId} não encontrado.`);
+        throw new Error(`Pedido "${targetIdentifier}" não encontrado.`);
       }
 
       // If already paid, simply mark event processed
@@ -120,7 +133,7 @@ export async function processPaymentWebhook(params: {
       if (eventType === 'PAYMENT_CONFIRMED') {
         // Transition order status
         await tx.order.update({
-          where: { id: orderId },
+          where: { id: order.id },
           data: {
             status: 'PAID',
             paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
@@ -190,7 +203,7 @@ export async function processPaymentWebhook(params: {
         }
       } else if (eventType === 'PAYMENT_FAILED') {
         await tx.order.update({
-          where: { id: orderId },
+          where: { id: order.id },
           data: {
             status: 'CANCELLED',
             cancelledAt: new Date(),

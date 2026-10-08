@@ -207,4 +207,50 @@ describe('Payment Liquidation & Idempotent Webhook Seam (Ticket 05 / Issue #6)',
     });
     expect(vouchersCount).toBe(2);
   });
+
+  it('allows identifying order by orderNumber string (e.g. ORD-...) in webhook payload', async () => {
+    // Create another pending order
+    const order2 = await prisma.order.create({
+      data: {
+        orderNumber: 'ORD-WH-TEST-BY-NUMBER',
+        userId,
+        status: 'PENDING',
+        paymentMethod: 'PIX',
+        subtotalInCents: 12000,
+        totalInCents: 12000,
+        items: {
+          create: {
+            productId: productSelfId,
+            quantity: 1,
+            unitPriceInCents: 12000,
+            totalPriceInCents: 12000,
+            allocationMode: 'FOR_SELF',
+          },
+        },
+      },
+    });
+
+    const payloadObj = {
+      eventId: 'evt_test_by_number_001',
+      eventType: 'PAYMENT_CONFIRMED',
+      transactionId: 'tx_number_123',
+      orderId: 'ORD-WH-TEST-BY-NUMBER',
+      amountInCents: 12000,
+    };
+    const rawBody = JSON.stringify(payloadObj);
+    const signature = generateHmacSignature(rawBody, webhookSecret);
+
+    const result = await processPaymentWebhook({
+      rawBody,
+      signature,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.success).toBe(true);
+
+    const updated = await prisma.order.findUnique({
+      where: { id: order2.id },
+    });
+    expect(updated?.status).toBe('PAID');
+  });
 });
