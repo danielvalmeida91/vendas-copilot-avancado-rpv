@@ -13,7 +13,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(result, { status: 201 });
+    const response = NextResponse.json(result, { status: 201 });
+    if (result.user?.id) {
+      response.cookies.set('auth_user_id', result.user.id, {
+        path: '/',
+        httpOnly: false,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
+    return response;
   } catch (error) {
     return NextResponse.json(
       {

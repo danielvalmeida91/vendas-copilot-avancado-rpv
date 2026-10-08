@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { getProductBySlug } from '@/services/catalog.service';
 import { formatCurrencyBRL } from '@/lib/formatters';
 
@@ -12,7 +13,9 @@ export default async function ProductDetailPage({
 }) {
   const { slug } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const product = await getProductBySlug(slug, { userId: resolvedSearchParams.userId });
+  const cookieStore = await cookies();
+  const userId = resolvedSearchParams.userId || cookieStore.get('auth_user_id')?.value;
+  const product = await getProductBySlug(slug, { userId });
 
   if (!product) {
     notFound();

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { listCatalogProducts } from '@/services/catalog.service';
 import { formatCurrencyBRL } from '@/lib/formatters';
 
@@ -8,7 +9,9 @@ export default async function CatalogoPage({
   searchParams?: Promise<{ userId?: string }>;
 }) {
   const resolvedParams = searchParams ? await searchParams : {};
-  const products = await listCatalogProducts({ userId: resolvedParams.userId });
+  const cookieStore = await cookies();
+  const userId = resolvedParams.userId || cookieStore.get('auth_user_id')?.value;
+  const products = await listCatalogProducts({ userId });
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-6xl">

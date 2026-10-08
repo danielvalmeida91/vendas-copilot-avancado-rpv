@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { getCustomerPurchasedGifts } from '@/services/customer-portal.service';
 import GiftsManager from './gifts-manager';
 
@@ -8,7 +9,8 @@ export default async function CustomerGiftsPage({
   searchParams?: Promise<{ userId?: string }>;
 }) {
   const resolvedParams = searchParams ? await searchParams : {};
-  const userId = resolvedParams.userId;
+  const cookieStore = await cookies();
+  const userId = resolvedParams.userId || cookieStore.get('auth_user_id')?.value;
 
   const gifts = userId ? await getCustomerPurchasedGifts(userId) : [];
 
@@ -42,8 +44,20 @@ export default async function CustomerGiftsPage({
       </div>
 
       {!userId ? (
-        <div className="p-8 bg-white border border-slate-200 rounded-2xl text-center">
-          <p className="text-slate-600">Identificação de usuário necessária para carregar presentes.</p>
+        <div className="p-12 bg-white border border-slate-200 rounded-2xl text-center space-y-4">
+          <span className="text-4xl">🔐</span>
+          <h2 className="text-xl font-bold text-slate-900">Você ainda não está identificado</h2>
+          <p className="text-slate-600 max-w-md mx-auto text-sm">
+            Entre com o mesmo e-mail ou CPF utilizado no checkout para acompanhar seus presentes enviados.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/login?redirect=/minha-conta/presentes"
+              className="inline-block px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm transition"
+            >
+              Fazer Login com E-mail ou CPF &rarr;
+            </Link>
+          </div>
         </div>
       ) : gifts.length === 0 ? (
         <div className="p-12 bg-white border border-slate-200 rounded-2xl text-center space-y-4">
