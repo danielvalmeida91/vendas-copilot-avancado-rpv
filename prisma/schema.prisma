@@ -1,0 +1,309 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  CUSTOMER
+  OPERATOR
+  ADMIN
+}
+
+enum AllocationMode {
+  FOR_SELF
+  FOR_GIFT
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+}
+
+enum LicenseStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum VoucherStatus {
+  SCHEDULED
+  ISSUED
+  REDEEMED
+  REVOKED
+}
+
+enum GiftDeliveryType {
+  IMMEDIATE_LINK
+  SCHEDULED_EMAIL
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum WebhookEventStatus {
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum AuditAction {
+  ORDER_REFUNDED
+  LICENSE_REVOKED
+  VOUCHER_REVOKED
+  VOUCHER_SCHEDULE_UPDATED
+  MANUAL_ACCESS_GRANT
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  email        String    @unique
+  cpf          String    @unique
+  passwordHash String?   @map("password_hash")
+  role         UserRole  @default(CUSTOMER)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  orders           Order[]
+  licenses         License[]
+  purchasedGifts   GiftVoucher[] @relation("PurchasedGifts")
+  receivedGifts    GiftVoucher[] @relation("ReceivedGifts")
+  couponUsages     CouponUsage[]
+  auditActions     AuditLog[]    @relation("OperatorAuditLogs")
+
+  @@index([email])
+  @@index([cpf])
+  @@map("users")
+}
+
+model Product {
+  id                      String   @id @default(uuid()) @db.Uuid
+  slug                    String   @unique
+  name                    String
+  description             String   @db.Text
+  priceInCents            Int      @map("price_in_cents")
+  isActive                Boolean  @default(true) @map("is_active")
+  canPurchaseMultipleSelf Boolean  @default(false) @map("can_purchase_multiple_self")
+  accessDurationDays      Int?     @map("access_duration_days")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  orderItems   OrderItem[]
+  licenses     License[]
+  giftVouchers GiftVoucher[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("products")
+}
+
+model Order {
+  id                    String        @id @default(uuid()) @db.Uuid
+  orderNumber           String        @unique @map("order_number")
+  userId                String        @db.Uuid @map("user_id")
+  status                OrderStatus   @default(PENDING)
+  paymentMethod         PaymentMethod @map("payment_method")
+  subtotalInCents       Int           @map("subtotal_in_cents")
+  discountInCents       Int           @default(0) @map("discount_in_cents")
+  totalInCents          Int           @map("total_in_cents")
+  gatewayTransactionId  String?       @map("gateway_transaction_id")
+  gatewayPaymentPayload String?       @db.Text @map("gateway_payment_payload")
+  couponId              String?       @db.Uuid @map("coupon_id")
+  paidAt                DateTime?     @map("paid_at")
+  cancelledAt           DateTime?     @map("cancelled_at")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  coupon       Coupon?       @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+  licenses     License[]
+  couponUsages CouponUsage[]
+  auditLogs    AuditLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([gatewayTransactionId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  orderId           String         @db.Uuid @map("order_id")
+  productId         String         @db.Uuid @map("product_id")
+  quantity          Int            @default(1)
+  unitPriceInCents  Int            @map("unit_price_in_cents")
+  totalPriceInCents Int            @map("total_price_in_cents")
+  allocationMode    AllocationMode @map("allocation_mode")
+
+  giftDeliveryType GiftDeliveryType? @map("gift_delivery_type")
+  recipientName    String?           @map("recipient_name")
+  recipientEmail   String?           @map("recipient_email")
+  giftScheduledAt  DateTime?         @map("gift_scheduled_at")
+  giftMessage      String?           @db.Text @map("gift_message")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  giftVouchers GiftVoucher[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model License {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid @map("user_id")
+  productId        String        @db.Uuid @map("product_id")
+  orderId          String        @db.Uuid @map("order_id")
+  giftVoucherId    String?       @unique @db.Uuid @map("gift_voucher_id")
+  status           LicenseStatus @default(ACTIVE)
+  activatedAt      DateTime      @default(now()) @map("activated_at")
+  revokedAt        DateTime?     @map("revoked_at")
+  revocationReason String?       @db.Text @map("revocation_reason")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  product     Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  giftVoucher GiftVoucher? @relation(fields: [giftVoucherId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+  @@map("licenses")
+}
+
+model GiftVoucher {
+  id               String           @id @default(uuid()) @db.Uuid
+  token            String           @unique
+  orderItemId      String           @db.Uuid @map("order_item_id")
+  purchaserUserId  String           @db.Uuid @map("purchaser_user_id")
+  recipientUserId  String?          @db.Uuid @map("recipient_user_id")
+  productId        String           @db.Uuid @map("product_id")
+  status           VoucherStatus    @default(ISSUED)
+  deliveryType     GiftDeliveryType @default(IMMEDIATE_LINK) @map("delivery_type")
+
+  recipientName    String?          @map("recipient_name")
+  recipientEmail   String?          @map("recipient_email")
+  giftMessage      String?          @db.Text @map("gift_message")
+
+  scheduledAt      DateTime?        @map("scheduled_at")
+  dispatchedAt     DateTime?        @map("dispatched_at")
+  redeemedAt       DateTime?        @map("redeemed_at")
+  revokedAt        DateTime?        @map("revoked_at")
+  revocationReason String?          @db.Text @map("revocation_reason")
+
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  orderItem      OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  purchaserUser  User      @relation("PurchasedGifts", fields: [purchaserUserId], references: [id], onDelete: Restrict)
+  recipientUser  User?     @relation("ReceivedGifts", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  grantedLicense License?
+
+  @@index([token])
+  @@index([purchaserUserId])
+  @@index([recipientUserId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("gift_vouchers")
+}
+
+model Coupon {
+  id                  String       @id @default(uuid()) @db.Uuid
+  code                String       @unique
+  description         String?
+  discountType        DiscountType @map("discount_type")
+  discountValue       Int          @map("discount_value")
+  minOrderAmountCents Int          @default(0) @map("min_order_amount_cents")
+  maxUses             Int?         @map("max_uses")
+  currentUses         Int          @default(0) @map("current_uses")
+  validFrom           DateTime     @map("valid_from")
+  validUntil          DateTime     @map("valid_until")
+  isActive            Boolean      @default(true) @map("is_active")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  orders       Order[]
+  couponUsages CouponUsage[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id                  String   @id @default(uuid()) @db.Uuid
+  couponId            String   @db.Uuid @map("coupon_id")
+  orderId             String   @db.Uuid @map("order_id")
+  userId              String   @db.Uuid @map("user_id")
+  discountAmountCents Int      @map("discount_amount_cents")
+  usedAt              DateTime @default(now()) @map("used_at")
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([couponId])
+  @@index([orderId])
+  @@index([userId])
+  @@map("coupon_usages")
+}
+
+model WebhookEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  gateway       String             @default("MOCK_GATEWAY")
+  eventId       String             @map("event_id")
+  eventType     String             @map("event_type")
+  transactionId String?            @map("transaction_id")
+  payload       Json
+  status        WebhookEventStatus @default(PROCESSING)
+  processedAt   DateTime?          @map("processed_at")
+  errorMessage  String?            @db.Text @map("error_message")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  @@unique([gateway, eventId])
+  @@index([transactionId])
+  @@index([status])
+  @@map("webhook_events")
+}
+
+model AuditLog {
+  id             String      @id @default(uuid()) @db.Uuid
+  operatorUserId String      @db.Uuid @map("operator_user_id")
+  action         AuditAction
+  targetEntity   String      @map("target_entity")
+  targetId       String      @map("target_id")
+  orderId        String?     @db.Uuid @map("order_id")
+  reason         String      @db.Text
+  metadata       Json?
+  ipAddress      String?     @map("ip_address")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  operator User   @relation("OperatorAuditLogs", fields: [operatorUserId], references: [id], onDelete: Restrict)
+  order    Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([operatorUserId])
+  @@index([targetEntity, targetId])
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
