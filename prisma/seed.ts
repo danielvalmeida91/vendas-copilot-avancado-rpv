@@ -62,6 +62,33 @@ async function main() {
     create: coupon,
   });
 
+  // Seed sample users for immediate login testing
+  const demoUser = {
+    email: 'cliente@exemplo.com',
+    name: 'Cliente Demonstração',
+    cpf: '12345678900',
+    role: 'CUSTOMER' as const,
+  };
+
+  await prisma.user.upsert({
+    where: { email: demoUser.email },
+    update: demoUser,
+    create: demoUser,
+  });
+
+  const adminUser = {
+    email: 'admin@exemplo.com',
+    name: 'Administrador da Loja',
+    cpf: '98765432100',
+    role: 'ADMIN' as const,
+  };
+
+  await prisma.user.upsert({
+    where: { email: adminUser.email },
+    update: adminUser,
+    create: adminUser,
+  });
+
   console.log('✅ Seeding completed.');
 }
 
